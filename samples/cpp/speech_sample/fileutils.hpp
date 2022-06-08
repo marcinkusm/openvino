@@ -17,19 +17,19 @@ public:
                            std::vector<uint8_t>& memory,
                            uint32_t* ptrNumRows,
                            uint32_t* ptrNumColumns,
-                           uint32_t* ptrNumBytesPerElement) = 0;
+                           uint32_t* ptrNumBytesPerElement) const = 0;
 
     virtual void save_file(const char* fileName,
                            bool shouldAppend,
                            std::string name,
                            void* ptrMemory,
                            uint32_t numRows,
-                           uint32_t numColumns) = 0;
+                           uint32_t numColumns) const = 0;
 
     virtual void get_file_info(const char* fileName,
                                uint32_t numArrayToFindSize,
                                uint32_t* ptrNumArrays,
-                               uint32_t* ptrNumMemoryBytes) = 0;
+                               uint32_t* ptrNumMemoryBytes) const = 0;
 };
 
 /// @brief Responsible to work with .ark files
@@ -46,7 +46,7 @@ public:
     void get_file_info(const char* fileName,
                        uint32_t numArrayToFindSize,
                        uint32_t* ptrNumArrays,
-                       uint32_t* ptrNumMemoryBytes) override;
+                       uint32_t* ptrNumMemoryBytes) const override;
 
     /**
      * @brief Load Kaldi ARK speech feature vector file
@@ -65,7 +65,7 @@ public:
                    std::vector<uint8_t>& memory,
                    uint32_t* ptrNumRows,
                    uint32_t* ptrNumColumns,
-                   uint32_t* ptrNumBytesPerElement) override;
+                   uint32_t* ptrNumBytesPerElement) const override;
 
     /**
      * @brief Save Kaldi ARK speech feature vector file
@@ -82,7 +82,7 @@ public:
                    std::string name,
                    void* ptrMemory,
                    uint32_t numRows,
-                   uint32_t numColumns) override;
+                   uint32_t numColumns) const override;
 };
 
 /// @brief Responsible to work with .npz files
@@ -99,7 +99,7 @@ public:
     void get_file_info(const char* fileName,
                        uint32_t numArrayToFindSize,
                        uint32_t* ptrNumArrays,
-                       uint32_t* ptrNumMemoryBytes) override;
+                       uint32_t* ptrNumMemoryBytes) const override;
 
     /**
      * @brief Load Numpy* uncompressed NPZ speech feature vector file
@@ -118,7 +118,7 @@ public:
                    std::vector<uint8_t>& memory,
                    uint32_t* ptrNumRows,
                    uint32_t* ptrNumColumns,
-                   uint32_t* ptrNumBytesPerElement) override;
+                   uint32_t* ptrNumBytesPerElement) const override;
 
     /**
      * @brief Save Numpy* uncompressed NPZ speech feature vector file
@@ -135,5 +135,58 @@ public:
                    std::string name,
                    void* ptrMemory,
                    uint32_t numRows,
-                   uint32_t numColumns) override;
+                   uint32_t numColumns) const override;
+};
+
+/**
+ * @brief Facade class allowing to support multiple implementation of BaseFile. Specific implementation is chosen
+ *     based on the file extension
+ */
+class FileHandler : public BaseFile {
+public:
+    /**
+     * Construct {FileHandler} object instance.
+     */
+    FileHandler();
+
+protected:
+    /**
+     * @see BaseFile.load_file()
+     * @throw logic_error in case unssported file format is used.
+     */
+    void load_file(const char* fileName,
+                   uint32_t arrayIndex,
+                   std::string& ptrName,
+                   std::vector<uint8_t>& memory,
+                   uint32_t* ptrNumRows,
+                   uint32_t* ptrNumColumns,
+                   uint32_t* ptrNumBytesPerElement) const override;
+
+    /**
+     * @see BaseFile.save_file()
+     * @throw logic_error in case unssported file format is used.
+     */
+    void save_file(const char* fileName,
+                   bool shouldAppend,
+                   std::string name,
+                   void* ptrMemory,
+                   uint32_t numRows,
+                   uint32_t numColumns) const override;
+
+    /**
+     * @see BaseFile.get_file_info()
+     * @throw logic_error in case unssported file format is used.
+     */
+    virtual void get_file_info(const char* fileName,
+                               uint32_t numArrayToFindSize,
+                               uint32_t* ptrNumArrays,
+                               uint32_t* ptrNumMemoryBytes) const override;
+
+private:
+    BaseFile& get_file_format_hanlder(const char* fileName) const;
+
+    static const std::string kArkFileExt;
+    static const std::string kNumpyFileExt;
+
+    std::unordered_map<std::string, std::unique_ptr<BaseFile>> supproted_file_formats_;
 };

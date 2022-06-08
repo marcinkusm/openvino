@@ -45,42 +45,14 @@ int main(int argc, char* argv[]) {
         if (!parse_and_check_command_line(argc, argv)) {
             return 0;
         }
-        BaseFile* file;
-        BaseFile* fileOutput;
-        ArkFile arkFile;
-        NumpyFile numpyFile;
-        std::pair<std::string, std::vector<std::string>> input_data;
+
+        ParsedIOParameters input_data;
         if (!FLAGS_i.empty())
             input_data = parse_parameters(FLAGS_i);
-        auto extInputFile = fileExt(input_data.first);
-        if (extInputFile == "ark") {
-            file = &arkFile;
-        } else if (extInputFile == "npz") {
-            file = &numpyFile;
-        } else {
-            throw std::logic_error("Invalid input file");
-        }
-        std::vector<std::string> inputFiles;
-        std::vector<uint32_t> numBytesThisUtterance;
-        uint32_t numUtterances(0);
-        if (!input_data.first.empty()) {
-            std::string outStr;
-            std::istringstream stream(input_data.first);
-            uint32_t currentNumUtterances(0), currentNumBytesThisUtterance(0);
-            while (getline(stream, outStr, ',')) {
-                std::string filename(fileNameNoExt(outStr) + "." + extInputFile);
-                inputFiles.push_back(filename);
-                file->get_file_info(filename.c_str(), 0, &currentNumUtterances, &currentNumBytesThisUtterance);
-                if (numUtterances == 0) {
-                    numUtterances = currentNumUtterances;
-                } else if (currentNumUtterances != numUtterances) {
-                    throw std::logic_error(
-                        "Incorrect input files. Number of utterance must be the same for all input files");
-                }
-                numBytesThisUtterance.push_back(currentNumBytesThisUtterance);
-            }
-        }
-        size_t numInputFiles(inputFiles.size());
+
+        std::unique_ptr<BaseFile> file_handler = std::unique_ptr<BaseFile>(new FileHandler);
+
+        auto utterance_value = readAndValidateInputFilesUtterance(input_data.file_names, *file_handler);
 
         // --------------------------- Step 1. Initialize OpenVINO Runtime core and read model
         // -------------------------------------
@@ -88,44 +60,37 @@ int main(int argc, char* argv[]) {
         slog::info << "Loading model files:" << slog::endl << FLAGS_m << slog::endl;
         uint32_t batchSize = (FLAGS_cw_r > 0 || FLAGS_cw_l > 0 || !FLAGS_bs) ? 1 : (uint32_t)FLAGS_bs;
         std::shared_ptr<ov::Model> model;
-        std::vector<std::string> outputs;
         std::vector<std::string> output_names;
-        std::vector<size_t> ports;
-        // --------------------------- Processing custom outputs ---------------------------------------------
-        std::pair<std::string, std::vector<std::string>> output_data;
-        std::pair<std::string, std::vector<std::string>> reference_data;
+        //  --------------------------- Processing custom outputs ---------------------------------------------
+        ParsedIOParameters output_data;
+        ParsedIOParameters reference_data;
+
         if (!FLAGS_o.empty())
             output_data = parse_parameters(FLAGS_o);
         if (!FLAGS_r.empty())
             reference_data = parse_parameters(FLAGS_r);
-        if (!output_data.second.empty())
-            output_names = output_data.second;
-        else if (!reference_data.second.empty())
-            output_names = reference_data.second;
-        for (const auto& output_name : output_names) {
-            auto pos_layer = output_name.rfind(":");
-            if (pos_layer == std::string::npos) {
-                throw std::logic_error("Output " + output_name + " doesn't have a port");
-            }
-            outputs.push_back(output_name.substr(0, pos_layer));
-            try {
-                ports.push_back(std::stoi(output_name.substr(pos_layer + 1)));
-            } catch (const std::exception&) {
-                throw std::logic_error("Ports should have integer type");
-            }
-        }
+
+        if (!output_data.blob_names.empty())
+            output_names = output_data.blob_names;
+        else if (!reference_data.blob_names.empty())
+            output_names = reference_data.blob_names;
+
+        auto outputs = parseOuputs(output_names);
+
         // ------------------------------ Preprocessing ------------------------------------------------------
         // the preprocessing steps can be done only for loaded network and are not applicable for the imported network
         // (already compiled)
         if (!FLAGS_m.empty()) {
             model = core.read_model(FLAGS_m);
+
             if (!outputs.empty()) {
-                for (size_t i = 0; i < outputs.size(); i++) {
-                    auto output = model->add_output(outputs[i], ports[i]);
-                    output.set_names({outputs[i] + ":" + std::to_string(ports[i])});
+                for (const auto& output : outputs) {
+                    auto output_node = model->add_output(output.name, output.port);
+                    output_node.set_names({output.name + ":" + std::to_string(output.port)});
                 }
             }
-            check_number_of_inputs(model->inputs().size(), numInputFiles);
+
+            check_number_of_inputs(model->inputs().size(), input_data.file_names.size());
             ov::preprocess::PrePostProcessor proc(model);
             const auto& inputs = model->inputs();
             std::map<std::string, std::string> custom_layouts;
@@ -193,11 +158,11 @@ int main(int argc, char* argv[]) {
                 throw std::logic_error(errMessage);
             } else {
                 auto scale_factors_per_input = parse_scale_factors(model->inputs(), FLAGS_sf);
-                if (numInputFiles != scale_factors_per_input.size()) {
+                if (input_data.file_names.size() != scale_factors_per_input.size()) {
                     std::string errMessage("Incorrect command line for multiple inputs: " +
                                            std::to_string(scale_factors_per_input.size()) +
-                                           " scale factors provided for " + std::to_string(numInputFiles) +
-                                           " input files.");
+                                           " scale factors provided for " +
+                                           std::to_string(input_data.file_names.size()) + " input files.");
                     throw std::logic_error(errMessage);
                 }
                 for (auto&& sf : scale_factors_per_input) {
@@ -211,20 +176,20 @@ int main(int argc, char* argv[]) {
                 slog::info << "Using scale factor from provided imported gna model: " << FLAGS_rg << slog::endl;
             } else {
                 std::map<std::string, float> scale_factors_per_input;
-                for (size_t i = 0; i < numInputFiles; i++) {
-                    auto inputFileName = inputFiles[i].c_str();
+                for (size_t i = 0; i < input_data.file_names.size(); i++) {
+                    auto inputFileName = input_data.file_names[i].c_str();
                     std::string name;
                     std::vector<uint8_t> ptrFeatures;
                     uint32_t numArrays(0), numBytes(0), numFrames(0), numFrameElements(0), numBytesPerElement(0);
-                    file->get_file_info(inputFileName, 0, &numArrays, &numBytes);
+                    file_handler->get_file_info(inputFileName, 0, &numArrays, &numBytes);
                     ptrFeatures.resize(numBytes);
-                    file->load_file(inputFileName,
-                                    0,
-                                    name,
-                                    ptrFeatures,
-                                    &numFrames,
-                                    &numFrameElements,
-                                    &numBytesPerElement);
+                    file_handler->load_file(inputFileName,
+                                            0,
+                                            name,
+                                            ptrFeatures,
+                                            &numFrames,
+                                            &numFrameElements,
+                                            &numBytesPerElement);
                     auto floatScaleFactor = scale_factor_for_quantization(ptrFeatures.data(),
                                                                           MAX_VAL_2B_FEAT,
                                                                           numFrames * numFrameElements);
@@ -261,7 +226,7 @@ int main(int argc, char* argv[]) {
         slog::info << "Model loading time " << loadTime.count() << " ms" << slog::endl;
         ov::CompiledModel executableNet;
         if (!FLAGS_m.empty()) {
-            slog::info << "Loading model to the device " << FLAGS_d << slog::endl;
+            slog::info << "Loading model to the device " << slog::endl;
             executableNet = core.compile_model(model, deviceStr, genericPluginConfig);
         } else {
             slog::info << "Importing model to the device" << slog::endl;
@@ -313,16 +278,16 @@ int main(int argc, char* argv[]) {
         // --------------------------------------------------
         std::vector<ov::Tensor> ptrInputBlobs;
         auto cInputInfo = executableNet.inputs();
-        check_number_of_inputs(cInputInfo.size(), numInputFiles);
-        if (!input_data.second.empty()) {
-            std::vector<std::string> inputNameBlobs = input_data.second;
-            if (inputNameBlobs.size() != cInputInfo.size()) {
+        check_number_of_inputs(cInputInfo.size(), input_data.file_names.size());
+        if (!input_data.blob_names.empty()) {
+            auto& input_blobs_names = input_data.blob_names;
+            if (input_blobs_names.size() != cInputInfo.size()) {
                 std::string errMessage(std::string("Number of network inputs ( ") + std::to_string(cInputInfo.size()) +
-                                       " ) is not equal to the number of inputs entered in the -iname argument ( " +
-                                       std::to_string(inputNameBlobs.size()) + " ).");
+                                       " ) is not equal to the number of inputs entered in the -i argument ( " +
+                                       std::to_string(input_blobs_names.size()) + " ).");
                 throw std::logic_error(errMessage);
             }
-            for (const auto& input : inputNameBlobs) {
+            for (const auto& input : input_blobs_names) {
                 ov::Tensor blob = inferRequests.begin()->inferRequest.get_tensor(input);
                 if (!blob) {
                     std::string errMessage("No blob with name : " + input);
@@ -335,27 +300,27 @@ int main(int argc, char* argv[]) {
                 ptrInputBlobs.push_back(inferRequests.begin()->inferRequest.get_tensor(input));
             }
         }
-        std::vector<std::string> output_name_files;
-        std::vector<std::string> reference_name_files;
+
         size_t count_file = 1;
-        if (!output_data.first.empty()) {
-            output_name_files = convert_str_to_vector(output_data.first);
-            if (output_name_files.size() != outputs.size() && !outputs.empty()) {
+        if (!output_data.file_names.empty()) {
+            if (output_data.file_names.size() != outputs.size() && !outputs.empty()) {
                 throw std::logic_error("The number of output files is not equal to the number of network outputs.");
             }
-            count_file = output_name_files.empty() ? 1 : output_name_files.size();
+            count_file = output_data.file_names.size();
         }
-        if (!reference_data.first.empty()) {
-            reference_name_files = convert_str_to_vector(reference_data.first);
-            if (reference_name_files.size() != outputs.size() && !outputs.empty()) {
+
+        if (!reference_data.file_names.empty()) {
+            if (reference_data.file_names.size() != outputs.size() && !outputs.empty()) {
                 throw std::logic_error("The number of reference files is not equal to the number of network outputs.");
             }
-            count_file = reference_name_files.empty() ? 1 : reference_name_files.size();
+            count_file = reference_data.file_names.size();
         }
-        if (count_file > executableNet.outputs().size()) {
+
+        if (count_file != executableNet.outputs().size()) {
             throw std::logic_error(
                 "The number of output/reference files is not equal to the number of network outputs.");
         }
+
         // -----------------------------------------------------------------------------------------------------
         // --------------------------- Step 5. Do inference --------------------------------------------------------
         std::vector<std::vector<uint8_t>> ptrUtterances;
@@ -363,41 +328,43 @@ int main(int argc, char* argv[]) {
                                                                                 : outputs.size());
         std::vector<uint16_t> numScoresPerOutput((outputs.size() == 0) ? executableNet.outputs().size()
                                                                        : outputs.size());
-        std::vector<std::vector<uint8_t>> vectorPtrReferenceScores(reference_name_files.size());
-        std::vector<ScoreErrorT> vectorFrameError(reference_name_files.size()),
-            vectorTotalError(reference_name_files.size());
-        ptrUtterances.resize(inputFiles.size());
+        std::vector<std::vector<uint8_t>> vectorPtrReferenceScores(reference_data.file_names.size());
+        std::vector<ScoreErrorT> vectorFrameError(reference_data.file_names.size()),
+            vectorTotalError(reference_data.file_names.size());
+        ptrUtterances.resize(input_data.file_names.size());
         // initialize memory state before starting
         for (auto&& state : inferRequests.begin()->inferRequest.query_state()) {
             state.reset();
         }
         /** Work with each utterance **/
-        for (uint32_t utteranceIndex = 0; utteranceIndex < numUtterances; ++utteranceIndex) {
+        for (uint32_t utteranceIndex = 0; utteranceIndex < utterance_value; ++utteranceIndex) {
             std::map<std::string, ov::ProfilingInfo> utterancePerfMap;
             uint64_t totalNumberOfRunsOnHw = 0;
             std::string uttName;
-            uint32_t numFrames(0), n(0);
+            uint32_t numFrames(0);
+            uint32_t n(0);
+            uint32_t num_bytes_this_utterance(0);
             std::vector<uint32_t> numFrameElementsInput;
-            std::vector<uint32_t> numFramesReference(reference_name_files.size()),
-                numFrameElementsReference(reference_name_files.size()),
-                numBytesPerElementReference(reference_name_files.size()),
-                numBytesReferenceScoreThisUtterance(reference_name_files.size());
+            std::vector<uint32_t> numFramesReference(reference_data.file_names.size());
+            std::vector<uint32_t> numFrameElementsReference(reference_data.file_names.size());
+            std::vector<uint32_t> numBytesPerElementReference(reference_data.file_names.size());
+            std::vector<uint32_t> numBytesReferenceScoreThisUtterance(reference_data.file_names.size());
 
             /** Get information from input file for current utterance **/
-            numFrameElementsInput.resize(numInputFiles);
-            for (size_t i = 0; i < inputFiles.size(); i++) {
+            numFrameElementsInput.resize(input_data.file_names.size());
+            for (size_t i = 0; i < input_data.file_names.size(); i++) {
                 std::vector<uint8_t> ptrUtterance;
-                auto inputFilename = inputFiles[i].c_str();
+                auto inputFilename = input_data.file_names[i].c_str();
                 uint32_t currentNumFrames(0), currentNumFrameElementsInput(0), currentNumBytesPerElementInput(0);
-                file->get_file_info(inputFilename, utteranceIndex, &n, &numBytesThisUtterance[i]);
-                ptrUtterance.resize(numBytesThisUtterance[i]);
-                file->load_file(inputFilename,
-                                utteranceIndex,
-                                uttName,
-                                ptrUtterance,
-                                &currentNumFrames,
-                                &currentNumFrameElementsInput,
-                                &currentNumBytesPerElementInput);
+                file_handler->get_file_info(inputFilename, utteranceIndex, &n, &num_bytes_this_utterance);
+                ptrUtterance.resize(num_bytes_this_utterance);
+                file_handler->load_file(inputFilename,
+                                        utteranceIndex,
+                                        uttName,
+                                        ptrUtterance,
+                                        &currentNumFrames,
+                                        &currentNumFrameElementsInput,
+                                        &currentNumBytesPerElementInput);
                 if (numFrames == 0) {
                     numFrames = currentNumFrames;
                 } else if (numFrames != currentNumFrames) {
@@ -436,34 +403,22 @@ int main(int argc, char* argv[]) {
             auto t0 = Time::now();
             auto t1 = t0;
 
-            BaseFile* fileReferenceScores;
             std::string refUtteranceName;
 
-            if (!reference_data.first.empty()) {
-                /** Read file with reference scores **/
-                auto exReferenceScoresFile = fileExt(reference_data.first);
-                if (exReferenceScoresFile == "ark") {
-                    fileReferenceScores = &arkFile;
-                } else if (exReferenceScoresFile == "npz") {
-                    fileReferenceScores = &numpyFile;
-                } else {
-                    throw std::logic_error("Invalid Reference Scores file");
-                }
+            if (!reference_data.file_names.empty()) {
                 for (size_t next_output = 0; next_output < count_file; next_output++) {
-                    if (fileReferenceScores != nullptr) {
-                        fileReferenceScores->get_file_info(reference_name_files[next_output].c_str(),
-                                                           utteranceIndex,
-                                                           &n,
-                                                           &numBytesReferenceScoreThisUtterance[next_output]);
-                        vectorPtrReferenceScores[next_output].resize(numBytesReferenceScoreThisUtterance[next_output]);
-                        fileReferenceScores->load_file(reference_name_files[next_output].c_str(),
-                                                       utteranceIndex,
-                                                       refUtteranceName,
-                                                       vectorPtrReferenceScores[next_output],
-                                                       &numFramesReference[next_output],
-                                                       &numFrameElementsReference[next_output],
-                                                       &numBytesPerElementReference[next_output]);
-                    }
+                    file_handler->get_file_info(reference_data.file_names[next_output].c_str(),
+                                                utteranceIndex,
+                                                &n,
+                                                &numBytesReferenceScoreThisUtterance[next_output]);
+                    vectorPtrReferenceScores[next_output].resize(numBytesReferenceScoreThisUtterance[next_output]);
+                    file_handler->load_file(reference_data.file_names[next_output].c_str(),
+                                            utteranceIndex,
+                                            refUtteranceName,
+                                            vectorPtrReferenceScores[next_output],
+                                            &numFramesReference[next_output],
+                                            &numFrameElementsReference[next_output],
+                                            &numBytesPerElementReference[next_output]);
                 }
             }
 
@@ -550,13 +505,12 @@ int main(int argc, char* argv[]) {
                         continue;
                     }
                     ptrInputBlobs.clear();
-                    if (input_data.second.empty()) {
+                    if (input_data.blob_names.empty()) {
                         for (auto& input : cInputInfo) {
                             ptrInputBlobs.push_back(inferRequest.inferRequest.get_tensor(input));
                         }
                     } else {
-                        std::vector<std::string> inputNameBlobs = input_data.second;
-                        for (const auto& input : inputNameBlobs) {
+                        for (const auto& input : input_data.blob_names) {
                             ov::Tensor blob = inferRequests.begin()->inferRequest.get_tensor(input);
                             if (!blob) {
                                 std::string errMessage("No blob with name : " + input);
@@ -567,7 +521,7 @@ int main(int argc, char* argv[]) {
                     }
 
                     /** Iterate over all the input blobs **/
-                    for (size_t i = 0; i < numInputFiles; ++i) {
+                    for (size_t i = 0; i < input_data.file_names.size(); ++i) {
                         ov::Tensor minput = ptrInputBlobs[i];
                         if (!minput) {
                             std::string errMessage("We expect ptrInputBlobs[" + std::to_string(i) +
@@ -592,7 +546,7 @@ int main(int argc, char* argv[]) {
                     inferRequest.frameIndex = index < 0 ? -2 : index;
                     inferRequest.numFramesThisBatch = numFramesThisBatch;
                     frameIndex += numFramesThisBatch;
-                    for (size_t j = 0; j < inputFiles.size(); j++) {
+                    for (size_t j = 0; j < input_data.file_names.size(); j++) {
                         if (FLAGS_cw_l > 0 || FLAGS_cw_r > 0) {
                             int idx = frameIndex - FLAGS_cw_l;
                             if (idx > 0 && idx < static_cast<int>(numFramesFile)) {
@@ -648,22 +602,14 @@ int main(int argc, char* argv[]) {
 
             for (size_t next_output = 0; next_output < count_file; next_output++) {
                 if (!FLAGS_o.empty()) {
-                    auto exOutputScoresFile = fileExt(output_data.first);
-                    if (exOutputScoresFile == "ark") {
-                        fileOutput = &arkFile;
-                    } else if (exOutputScoresFile == "npz") {
-                        fileOutput = &numpyFile;
-                    } else {
-                        throw std::logic_error("Invalid Reference Scores file");
-                    }
                     /* Save output data to file */
                     bool shouldAppend = (utteranceIndex == 0) ? false : true;
-                    fileOutput->save_file(output_name_files[next_output].c_str(),
-                                          shouldAppend,
-                                          uttName,
-                                          &vectorPtrScores[next_output].front(),
-                                          numFramesFile,
-                                          numScoresPerOutput[next_output] / batchSize);
+                    file_handler->save_file(output_data.file_names[next_output].c_str(),
+                                            shouldAppend,
+                                            uttName,
+                                            &vectorPtrScores[next_output].front(),
+                                            numFramesFile,
+                                            numScoresPerOutput[next_output] / batchSize);
                 }
                 if (!FLAGS_r.empty()) {
                     // print statistical score error

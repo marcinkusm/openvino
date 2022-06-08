@@ -15,6 +15,25 @@ typedef std::chrono::duration<double, std::ratio<1, 1000>> ms;
 typedef std::chrono::duration<float> fsec;
 
 /**
+ * @brief struct to store parsed input/output parameters
+ */
+struct ParsedIOParameters {
+    std::vector<std::string> file_names{};
+    std::vector<std::string> blob_names{};
+};
+
+/**
+ * @brief struct to store output parameters
+ */
+struct OutputParameters {
+    OutputParameters() {}
+    OutputParameters(std::string outputName, size_t outputPort) : name{std::move(outputName)}, port{outputPort} {}
+    OutputParameters(std::string&& outputName, size_t&& outputPort) : name{std::move(outputName)}, port{outputPort} {}
+    std::string name{};
+    size_t port{0};
+};
+
+/**
  * @brief struct to store score error
  */
 struct ScoreErrorT {
@@ -536,35 +555,90 @@ std::map<std::string, std::string> parse_input_layouts(const std::string& layout
 }
 
 /**
- * @brief Parse parameters for inputs/outputs like as "<name1>=<file1.ark/.npz>,<name2>=<file2.ark/.npz>" or
- * "<file.ark/.npz>" in case of one input/output
+ * @brief Parse parameters for inputs/outputs/reference like as "<name1>=<file1.ark/.npz>,<name2>=<file2.ark/.npz>" or
+ * "<file.ark/.npz>" in case of one input/output/reference.
+ * Examplary result for given data: {{<file1.ark/.npz>,<file2.ark/.npz>},{"<name1>,<name2>"}}
  * @param file_paths_string input/output path
- * @return pair of filename and vector of tensor_names
+ * @return ParsedIOParameters representing filenames and and blob names(e.g. tensors)
  */
-std::pair<std::string, std::vector<std::string>> parse_parameters(const std::string file_paths_string) {
-    auto search_string = file_paths_string;
-    char comma_delim = ',';
-    char equal_delim = '=';
-    std::string filename = "";
-    std::vector<std::string> tensor_names;
-    std::vector<std::string> filenames;
-    if (!std::count(search_string.begin(), search_string.end(), comma_delim) &&
-        !std::count(search_string.begin(), search_string.end(), equal_delim)) {
-        return {search_string, tensor_names};
+ParsedIOParameters parse_parameters(const std::string& parameter_string) {
+    static constexpr char kCommaDelim = ',';
+    static constexpr char kEqualDelim = '=';
+
+    auto comma_delim_position = parameter_string.find(kCommaDelim);
+    auto equal_delim_position = parameter_string.find(kEqualDelim);
+
+    ParsedIOParameters parsed_parameters;
+    // There is possible to pass only one input file name
+    if (comma_delim_position = std::string::npos && equal_delim_position == std::string::npos) {
+        parsed_parameters.file_names.push_back(parameter_string);
+        return parsed_parameters;
     }
-    search_string += comma_delim;
-    std::vector<std::string> splitted = split(search_string, comma_delim);
-    for (size_t j = 0; j < splitted.size(); j++) {
-        auto semicolon_pos = splitted[j].find_first_of(equal_delim);
-        if (semicolon_pos != std::string::npos) {
-            tensor_names.push_back(splitted[j].substr(0, semicolon_pos));
-            filenames.push_back(splitted[j].substr(semicolon_pos + 1, std::string::npos));
+
+    std::vector<std::string> splitted_parameters = split(parameter_string, kCommaDelim);
+
+    for (const auto& parameter : splitted_parameters) {
+        auto equal_pos = parameter.find_first_of(kEqualDelim);
+        if (equal_pos != std::string::npos) {
+            parsed_parameters.blob_names.emplace_back(parameter.substr(0, equal_pos));
+            parsed_parameters.file_names.emplace_back(parameter.substr(equal_pos + 1));
         }
     }
-    for (std::vector<std::string>::const_iterator name = filenames.begin(); name != filenames.end(); ++name) {
-        filename += *name;
-        if (name != filenames.end() - 1)
-            filename += comma_delim;
+
+    return parsed_parameters;
+}
+
+/**
+ * @brief Method Read Utterance from input files and validate if all files have the same value of uttrances.
+ * @param files_names files to be read
+ * @param file_handler used to read uttrance from files
+ * @return read uttrence values for given files. Default values in vase files_names is empty.
+ * @throw std::logic_error in case number of uttrance is not the same in all files
+ */
+uint32_t readAndValidateInputFilesUtterance(const std::vector<std::string>& file_names, const BaseFile& file_handler) {
+    uint32_t uttrence(0);
+    if (!file_names.empty()) {
+        uint32_t current_num_utterances(0), current_num_bytes_this_utterance(0);
+
+        for (const auto& file_name : file_names) {
+            file_handler.get_file_info(file_name.c_str(),
+                                       0,
+                                       &current_num_utterances,
+                                       &current_num_bytes_this_utterance);
+
+            if (uttrence == 0) {
+                uttrence = current_num_utterances;
+            } else if (current_num_utterances != uttrence) {
+                throw std::logic_error(
+                    "Incorrect input files. Number of utterance must be the same for all input files");
+            }
+        }
     }
-    return {filename, tensor_names};
+    return uttrence;
+}
+
+/**
+ * @brief Parse outputs given in \p output_names to coresponding layer's names and ports.
+ * @param output_names names of outputs
+ * @return representation of OutputParameters coresponding given outpus_names
+ * @throw std::logic_error in case layer output name does not have port or port is not an integer type
+ */
+std::vector<OutputParameters> parseOuputs(const std::vector<std::string>& output_names) {
+    std::vector<OutputParameters> parameters;
+    for (const auto& output_name : output_names) {
+        auto layer_position = output_name.rfind(":");
+
+        if (layer_position == std::string::npos) {
+            throw std::logic_error("Output " + output_name + " doesn't have a port");
+        }
+
+        try {
+            auto layer_name = output_name.substr(0, layer_position);
+            auto port = static_cast<std::size_t>(std::stoul(output_name.substr(layer_position + 1)));
+            parameters.emplace_back(std::move(layer_name), port);
+        } catch (const std::exception&) {
+            throw std::logic_error("Ports should have integer type");
+        }
+    }
+    return parameters;
 }

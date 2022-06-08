@@ -192,12 +192,6 @@ DEFINE_int32(cw_r, 0, context_window_message_r);
 /// @brief Left context window size (default 0)
 DEFINE_int32(cw_l, 0, context_window_message_l);
 
-/// @brief Output layer name
-DEFINE_string(oname, "", output_layer_names_message);
-
-/// @brief Input layer name
-DEFINE_string(iname, "", input_layer_names_message);
-
 /// @brief Input layer name
 DEFINE_string(layout, "", layout_message);
 
@@ -228,8 +222,6 @@ static void show_usage() {
     std::cout << "    -we \"<path>\"               " << write_embedded_model_message << std::endl;
     std::cout << "    -cw_l \"<integer>\"          " << context_window_message_l << std::endl;
     std::cout << "    -cw_r \"<integer>\"          " << context_window_message_r << std::endl;
-    std::cout << "    -oname \"<string>\"          " << output_layer_names_message << std::endl;
-    std::cout << "    -iname \"<string>\"          " << input_layer_names_message << std::endl;
     std::cout << "    -layout \"<string>\"         " << layout_message << std::endl;
     std::cout << "    -pwl_me \"<double>\"         " << pwl_max_error_percent_message << std::endl;
     std::cout << "    -exec_target \"<string>\"    " << execution_target_message << std::endl;

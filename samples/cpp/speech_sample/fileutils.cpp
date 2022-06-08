@@ -7,7 +7,7 @@
 void ArkFile::get_file_info(const char* fileName,
                             uint32_t numArrayToFindSize,
                             uint32_t* ptrNumArrays,
-                            uint32_t* ptrNumMemoryBytes) {
+                            uint32_t* ptrNumMemoryBytes) const {
     uint32_t numArrays = 0;
     uint32_t numMemoryBytes = 0;
 
@@ -49,7 +49,7 @@ void ArkFile::load_file(const char* fileName,
                         std::vector<uint8_t>& memory,
                         uint32_t* ptrNumRows,
                         uint32_t* ptrNumColumns,
-                        uint32_t* ptrNumBytesPerElement) {
+                        uint32_t* ptrNumBytesPerElement) const {
     std::ifstream in_file(fileName, std::ios::binary);
     if (in_file.good()) {
         uint32_t i = 0;
@@ -94,7 +94,7 @@ void ArkFile::save_file(const char* fileName,
                         std::string name,
                         void* ptrMemory,
                         uint32_t numRows,
-                        uint32_t numColumns) {
+                        uint32_t numColumns) const {
     std::ios_base::openmode mode = std::ios::binary;
     if (shouldAppend) {
         mode |= std::ios::app;
@@ -118,7 +118,7 @@ void ArkFile::save_file(const char* fileName,
 void NumpyFile::get_file_info(const char* fileName,
                               uint32_t numArrayToFindSize,
                               uint32_t* ptrNumArrays,
-                              uint32_t* ptrNumMemoryBytes) {
+                              uint32_t* ptrNumMemoryBytes) const {
     uint32_t numArrays = 0;
     uint32_t numMemoryBytes = 0;
 
@@ -145,7 +145,7 @@ void NumpyFile::load_file(const char* fileName,
                           std::vector<uint8_t>& memory,
                           uint32_t* ptrNumRows,
                           uint32_t* ptrNumColumns,
-                          uint32_t* ptrNumBytesPerElement) {
+                          uint32_t* ptrNumBytesPerElement) const {
     cnpy::npz_t my_npz1 = cnpy::npz_load(fileName);
     auto it = my_npz1.begin();
     std::advance(it, arrayIndex);
@@ -170,9 +170,61 @@ void NumpyFile::save_file(const char* fileName,
                           std::string name,
                           void* ptrMemory,
                           uint32_t numRows,
-                          uint32_t numColumns) {
+                          uint32_t numColumns) const {
     std::string mode;
     shouldAppend ? mode = "a" : mode = "w";
     std::vector<size_t> shape{numRows, numColumns};
     cnpy::npz_save(fileName, name, reinterpret_cast<float*>(ptrMemory), shape, mode);
+}
+
+const std::string FileHandler::kArkFileExt = "ark";
+const std::string FileHandler::kNumpyFileExt = "npz";
+
+FileHandler::FileHandler() {
+    supproted_file_formats_.emplace(kArkFileExt, std::unique_ptr<BaseFile>(new ArkFile()));
+    supproted_file_formats_.emplace(kNumpyFileExt, std::unique_ptr<BaseFile>(new NumpyFile()));
+}
+
+void FileHandler::get_file_info(const char* fileName,
+                                uint32_t numArrayToFindSize,
+                                uint32_t* ptrNumArrays,
+                                uint32_t* ptrNumMemoryBytes) const {
+    auto& file_handler = get_file_format_hanlder(fileName);
+    file_handler.get_file_info(fileName, numArrayToFindSize, ptrNumArrays, ptrNumMemoryBytes);
+}
+
+void FileHandler::load_file(const char* fileName,
+                            uint32_t arrayIndex,
+                            std::string& ptrName,
+                            std::vector<uint8_t>& memory,
+                            uint32_t* ptrNumRows,
+                            uint32_t* ptrNumColumns,
+                            uint32_t* ptrNumBytesPerElement) const {
+    auto& file_handler = get_file_format_hanlder(fileName);
+    file_handler.load_file(fileName, arrayIndex, ptrName, memory, ptrNumRows, ptrNumColumns, ptrNumBytesPerElement);
+}
+
+void FileHandler::save_file(const char* fileName,
+                            bool shouldAppend,
+                            std::string name,
+                            void* ptrMemory,
+                            uint32_t numRows,
+                            uint32_t numColumns) const {
+    auto& file_handler = get_file_format_hanlder(fileName);
+    file_handler.save_file(fileName, shouldAppend, name, ptrMemory, numRows, numColumns);
+}
+
+BaseFile& FileHandler::get_file_format_hanlder(const char* fileName) const {
+    auto file_extension = fileExt(fileName);
+    auto iter = supproted_file_formats_.find(file_extension);
+
+    if (iter == supproted_file_formats_.end()) {
+        std::string error_message = "Invalid file format. Only following file format are supported:";
+        for (const auto& file_format : supproted_file_formats_) {
+            error_message.append(" " + file_format.first);
+        }
+        throw std::logic_error(error_message);
+    }
+
+    return *iter->second;
 }
