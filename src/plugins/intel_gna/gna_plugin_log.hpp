@@ -19,6 +19,7 @@
 #define gnalog() std::cout
 #define gnawarn() std::cerr
 #else
+#define MODEL_DUMP
 
 #ifdef VERBOSE
 #define VERBOSE_LEVEL (1)
