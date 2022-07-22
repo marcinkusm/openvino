@@ -1711,7 +1711,7 @@ void GNAPlugin::Export(std::ostream &outStream) {
 
     // TODO: nnet group parameter looks only used in application - so can we move this line into load network.
     IE_ASSERT(!inputs_data_map_.empty());
-    auto inputDims = inputs_data_map_.begin()->second->getTensorDesc().getDims();
+    //auto inputDims = inputs_data_map_.begin()->second->getTensorDesc().getDims();
 
     Gna2Model* model_to_serial = requestWorkerPool_->firstWorker().model();
     auto serial = GNAModelSerial(model_to_serial,

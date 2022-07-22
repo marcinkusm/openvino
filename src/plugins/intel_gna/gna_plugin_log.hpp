@@ -15,7 +15,7 @@
  */
 #define PLOT
 #define GNA_HEAP_PROFILER
-#define MODEL_DUMP
+#define MODEL_DUMP // TODO remove
 #define gnalog() std::cout
 #define gnawarn() std::cerr
 #else

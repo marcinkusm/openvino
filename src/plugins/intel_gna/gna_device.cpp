@@ -161,7 +161,8 @@ uint32_t GNADeviceHelper::enqueueRequest(const uint32_t requestConfigID, Gna2Acc
     const auto status1 = Gna2RequestConfigSetAccelerationMode(requestConfigID, gna2AccelerationMode);
     checkGna2Status(status1, "Gna2RequestConfigSetAccelerationMode");
 
-    if (debugLogEnabled) {
+    //if (debugLogEnabled) {
+    if (1) {
         dumpAllAllocations(debugLogIndexRequestEnqueue, "BeforeGna2RequestEnqueue");
         debugLogIndexRequestEnqueue++;
     }
@@ -209,7 +210,8 @@ uint32_t GNADeviceHelper::createModel(Gna2Model& gnaModel) const {
 
     GNAPluginNS::backend::AMIntelDNN::updateNumberOfOutputsIfPoolingEnabled(gnaModel, legacyExecTarget);
 
-    if (debugLogEnabled) {
+    //if (debugLogEnabled) {
+    if (1) {
         std::string path =
 #ifdef _WIN32
             ".\\";
@@ -476,7 +478,7 @@ GNAPluginNS::RequestStatus GNADeviceHelper::waitForRequest(uint32_t requestID, i
     }
     checkGna2Status(status, "Gna2RequestWait");
 
-    if (debugLogEnabled) {
+    if (1) {
         dumpAllAllocations(debugLogIndexRequestWait, "AfterGna2RequestWait");
         debugLogIndexRequestWait++;
     }
