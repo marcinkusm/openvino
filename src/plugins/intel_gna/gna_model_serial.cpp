@@ -376,11 +376,13 @@ void GNAModelSerial::Import(void *basePointer,
     is.read(reinterpret_cast<char*>(basePointer), gnaGraphSize);
 }
 
-void GNAModelSerial::Export(const GnaAllocations& allocations, std::ostream& os) const {
+void GNAModelSerial::Export(const GnaAllocations& allocationsReadonly, std::ostream& os) const {
     os.exceptions(std::ostream::failbit);
 
     const std::vector<Gna2Operation>
         layers(gna2model_->Operations, gna2model_->Operations + gna2model_->NumberOfOperations);
+    auto allocations = allocationsReadonly;
+    allocations.RemoveNotSet();
 
     const auto gnaGraphSize = allocations.GetSizeForExport();
     const auto& allocationsOrdered = allocations.GetAllocationsInExportOrder();

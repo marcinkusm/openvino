@@ -27,12 +27,18 @@ struct GnaAllocation {
     size_t sizeRequested = 0;
     size_t sizeGranted = 0;
     void SetTag(Gna2MemoryTag in) {
-        isTagSet = true;
+        isTagSet_ = true;
         tag = in;
     }
+
     bool isTag(Gna2MemoryTag in) const {
-        return isTagSet && in == tag;
+        return isTagSet_ && in == tag;
     }
+
+    bool isTagSet() const {
+        return isTagSet_;
+    }
+
     std::string GetTagName() const {
         static const std::map< Gna2MemoryTag, std::string > tm = {
                 { Gna2MemoryTagReadWrite, "Gna2MemoryTagReadWrite" },
@@ -44,7 +50,7 @@ struct GnaAllocation {
                 { Gna2MemoryTagScratch, "Gna2MemoryTagScratch" },
                 { Gna2MemoryTagState, "Gna2MemoryTagState" },
         };
-        if (!isTagSet) {
+        if (!isTagSet_) {
             return "Gna2MemoryTag_NotSet_";
         }
         auto f = tm.find(tag);
@@ -90,7 +96,7 @@ struct GnaAllocation {
 
 private:
     Gna2MemoryTag tag = Gna2MemoryTagScratch;
-    bool isTagSet = false;
+    bool isTagSet_ = false;
 };
 
 class GnaAllocations {
@@ -150,6 +156,16 @@ public:
     bool Remove(void* memPtr) {
         auto found = std::find_if(allocations.begin(), allocations.end(), [memPtr](const GnaAllocation& a) {
             return a.ptr == memPtr;
+        });
+        if (found != allocations.end()) {
+            allocations.erase(found);
+            return true;
+        }
+        return false;
+    }
+    bool RemoveNotSet() {
+        auto found = std::find_if(allocations.begin(), allocations.end(), [](const GnaAllocation& a) {
+            return !a.isTagSet();
         });
         if (found != allocations.end()) {
             allocations.erase(found);
