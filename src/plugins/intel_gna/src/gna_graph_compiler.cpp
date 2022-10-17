@@ -33,7 +33,7 @@
 #include "layers/gna_convolution_layer.hpp"
 #include "layers/gna_crop_layer.hpp"
 #include "layers/gna_fake_quantize_layer.hpp"
-#include "round_float_define.hpp"
+#include "common/numerical_utils.hpp"
 #include "gna_groups.hpp"
 #include "backend/gna_limitations.hpp"
 #include "descriptions/gna_desc.hpp"
@@ -43,6 +43,7 @@ using namespace InferenceEngine;
 using namespace std;
 using namespace GNAPluginNS;
 using namespace memory;
+using namespace ov::intel_gna::common;
 
 static bool CheckIFLastComponentIsPrecededByConv2D(const GNAPluginNS::backend::DnnComponents::storage_type& components,
                                             bool verify_with_pooling = true) {
@@ -817,16 +818,16 @@ void GNAGraphCompiler::PowerPrimitive(InferenceEngine::CNNLayerPtr layer) {
         } else {
             IE_ASSERT(quantized != nullptr);
             if (!gnaFlags->input_low_precision) {
-                auto quantizedScale = FLOAT_TO_INT16(std::min(quantized->_weights_quant.GetScale() * power.scale,
+                auto quantizedScale = float_to_int16(std::min(quantized->_weights_quant.GetScale() * power.scale,
                     static_cast<float>(INT16_MAX)));
-                auto quantizedOffset = FLOAT_TO_INT32(std::min(quantized->_dst_quant.GetScale() * power.offset,
+                auto quantizedOffset = float_to_int32(std::min(quantized->_dst_quant.GetScale() * power.offset,
                     static_cast<float>(INT32_MAX)));
                 gnamem->getQueue(REGION_RO)->push_value<int16_t>(layer, ptr_weights, quantizedScale, num_rows_out, 64);
                 gnamem->getQueue(REGION_RO)->push_value<int32_t>(layer, ptr_biases, quantizedOffset, num_rows_out, 64);
             } else {
-                auto quantizedScale = FLOAT_TO_INT8(std::min(quantized->_weights_quant.GetScale() * power.scale,
+                auto quantizedScale = float_to_int8(std::min(quantized->_weights_quant.GetScale() * power.scale,
                     static_cast<float>(INT8_MAX)));
-                auto quantizedOffset = FLOAT_TO_INT8(std::min(quantized->_dst_quant.GetScale() * power.offset,
+                auto quantizedOffset = float_to_int8(std::min(quantized->_dst_quant.GetScale() * power.offset,
                     static_cast<float>(INT8_MAX)));
                 gnamem->getQueue(REGION_RO)->push_value<int8_t>(layer, ptr_weights, quantizedScale, num_rows_out, 64);
                 gnamem->getQueue(REGION_RO)->push_value<int8_t>(layer, ptr_biases, quantizedOffset, num_rows_out, 64);
@@ -1358,10 +1359,10 @@ void GNAGraphCompiler::EltwisePrimitive(InferenceEngine::CNNLayerPtr layer) {
             auto scaledIdentity = -quantized->_weights_quant.GetScale();
 
             if (gnaFlags->input_low_precision == false) {
-                auto quantizedIdentity = FLOAT_TO_INT16(std::min(scaledIdentity, static_cast<float>(INT16_MAX)));
+                auto quantizedIdentity = float_to_int16(std::min(scaledIdentity, static_cast<float>(INT16_MAX)));
                 gnamem->getQueue(REGION_RO)->push_value<int16_t>(layer, ptr_weights, quantizedIdentity, num_rows_out, 64);
             } else {
-                auto quantizedIdentity = FLOAT_TO_INT8(std::min(scaledIdentity, static_cast<float>(INT8_MAX)));
+                auto quantizedIdentity = float_to_int8(std::min(scaledIdentity, static_cast<float>(INT8_MAX)));
 
                 gnamem->getQueue(REGION_RO)->push_value<int8_t>(layer, ptr_weights, quantizedIdentity, num_rows_out, 64);
             }
@@ -1375,11 +1376,11 @@ void GNAGraphCompiler::EltwisePrimitive(InferenceEngine::CNNLayerPtr layer) {
             auto scaledIdentity = quantized->_weights_quant.GetScale();
 
             if (gnaFlags->input_low_precision == false) {
-                auto quantizedIdentity = FLOAT_TO_INT16(std::min(scaledIdentity, static_cast<float>(INT16_MAX)));
+                auto quantizedIdentity = float_to_int16(std::min(scaledIdentity, static_cast<float>(INT16_MAX)));
 
                 gnamem->getQueue(REGION_RO)->push_value<int16_t>(layer, ptr_weights, quantizedIdentity, num_rows_out, 64);
             } else {
-                auto quantizedIdentity = FLOAT_TO_INT8(std::min(scaledIdentity, static_cast<float>(INT8_MAX)));
+                auto quantizedIdentity = float_to_int8(std::min(scaledIdentity, static_cast<float>(INT8_MAX)));
 
                 gnamem->getQueue(REGION_RO)->push_value<int8_t>(layer, ptr_weights, quantizedIdentity, num_rows_out, 64);
             }

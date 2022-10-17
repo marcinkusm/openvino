@@ -11,12 +11,14 @@
 #include "common/gna_target.hpp"
 #include "cpp_interfaces/interface/ie_internal_plugin_config.hpp"
 #include "ie_common.h"
+#include "common/numerical_utils.hpp"
 #include <caseless.hpp>
 #include <unordered_map>
 #include <openvino/util/common_util.hpp>
 
 using namespace InferenceEngine;
 using namespace InferenceEngine::details;
+using namespace ov::intel_gna::common;
 
 namespace GNAPluginNS {
 const uint8_t Config::max_num_requests;
@@ -50,12 +52,8 @@ void Config::UpdateFromMap(const std::map<std::string, std::string>& config) {
         auto key = item.first;
         auto value = item.second;
 
-        auto fp32eq = [](float p1, float p2) -> bool {
-            return (std::abs(p1 - p2) <= 0.00001f * std::min(std::abs(p1), std::abs(p2)));
-        };
-
         auto check_scale_factor = [&] (float scale_factor) {
-            if (fp32eq(scale_factor, 0.0f) || std::isinf(scale_factor)) {
+            if (are_fp_eq(scale_factor, 0.0f) || std::isinf(scale_factor)) {
                 THROW_GNA_EXCEPTION << "input scale factor of 0.0f or +-inf not supported";
             }
         };

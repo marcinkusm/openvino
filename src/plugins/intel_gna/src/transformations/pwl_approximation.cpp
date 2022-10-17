@@ -7,6 +7,7 @@
 #include "transformations/utils/utils.hpp"
 #include "ops/pwl.hpp"
 #include "ops/reference/pwl.hpp"
+#include "common/numerical_utils.hpp"
 
 #include <memory>
 #include <vector>
@@ -24,6 +25,7 @@ static constexpr double EXP_BREAK = 0.045;
 
 using namespace ov::intel_gna;
 using namespace ov::intel_gna::pass;
+using namespace ov::intel_gna::common;
 
 NGRAPH_RTTI_DEFINITION(PWLApproximation, "PWLApproximation", 0);
 NGRAPH_RTTI_DEFINITION(PWLApproximationWithFq, "PWLApproximationWithFq", 0);
@@ -150,7 +152,8 @@ double pivot_search(const details::Function<T>& activation_function,
             if (max_epsilon > max_epsilon_prev) {
                 j = j - 1;
                 Delta = Delta / 2;
-            } else if (max_epsilon == max_epsilon_prev) {
+                same_epsilon = false;
+            } else if (are_fp_eq(max_epsilon, max_epsilon_prev)) {
                 if (!same_epsilon) {
                     same_epsilon = true;
                 } else {
