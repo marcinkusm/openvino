@@ -81,10 +81,18 @@ ngraph::pass::ConvertTileToLegacyMatcher::ConvertTileToLegacyMatcher() {
             ++tiles_it;
         }
 
-        // TODO: If last_node points to input layer, its name will be changed to the tile layer name. There will be
-        // issue with conversion from ngraph::Function to CNNNetwork.
-        last_node.get_node_shared_ptr()->set_friendly_name(tile->get_friendly_name());
-        ngraph::copy_runtime_info(tile, new_ops);
+        if (!new_ops.empty()) {
+            ngraph::copy_runtime_info(tile, new_ops);
+            last_node.get_node_shared_ptr()->set_friendly_name(tile->get_friendly_name());
+        } else {
+            // If new_ops is empty it means that last_node points to original input to Tile layer.
+            // If last_node is a Parameter it means we cannot copy friendly_name
+            // from Tile due the fact it would modify input name of original netowork.
+            auto parameter = std::dynamic_pointer_cast<ngraph::opset1::Parameter>(last_node.get_node_shared_ptr());
+            if (parameter == nullptr) {
+                last_node.get_node_shared_ptr()->set_friendly_name(tile->get_friendly_name());
+            }
+        }
 
         ngraph::replace_node(tile, {last_node});
         return true;
