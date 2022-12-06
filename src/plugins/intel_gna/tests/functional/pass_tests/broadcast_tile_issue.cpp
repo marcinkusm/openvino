@@ -10,12 +10,14 @@
 
 namespace {
 
-enum class FunctionVariant { BroadcastAfterActivation, BroadcastBeforeActivation };
+enum class FunctionVariant { BroadcastAfterActivation, BroadcastBeforeActivation, BroadcastNearActivation };
 
 std::map<FunctionVariant, std::string> gc_function_variant_names_map = {
     {FunctionVariant::BroadcastAfterActivation, "BroadcastAfterActivation"},  // checks if there is no regression
     {FunctionVariant::BroadcastBeforeActivation,
-     "BroadcastBeforeActivation"}};  // checks fix ConvertTileToLegacyMatcher
+     "BroadcastBeforeActivation"},
+    {FunctionVariant::BroadcastNearActivation,
+     "BroadcastNearActivation"}};  // checks fix ConvertTileToLegacyMatcher
 
 struct FunctionConfig {
     FunctionVariant variant;
@@ -36,6 +38,7 @@ std::shared_ptr<ngraph::Function> createFunction(const FunctionConfig& config) {
                                                          ngraph::Shape{{input_shape.size()}},
                                                          input_shape);
 
+    ngraph::ResultVector results;
     // Broadcast is converted to tile. Tile is converted to Tile IE.
     if (config.variant == FunctionVariant::BroadcastAfterActivation) {
         auto length = std::accumulate(input_shape.begin(), input_shape.end(), (size_t)1, std::multiplies<size_t>());
@@ -49,16 +52,32 @@ std::shared_ptr<ngraph::Function> createFunction(const FunctionConfig& config) {
         auto broadcast = std::make_shared<ngraph::opset9::Broadcast>(activation, target_shape);
         broadcast->set_friendly_name(config.output_name);
         result = std::make_shared<ngraph::opset9::Result>(broadcast);
-
-    } else {
+        results = {result};
+    } else if (config.variant == FunctionVariant::BroadcastBeforeActivation) {
         auto broadcast = std::make_shared<ngraph::opset9::Broadcast>(input_param, target_shape);
 
         auto activation = std::make_shared<ngraph::opset9::Sigmoid>(broadcast);
         activation->set_friendly_name(config.output_name);
         result = std::make_shared<ngraph::opset9::Result>(activation);
+        results = {result};
+    } else {
+        auto broadcast = std::make_shared<ngraph::opset9::Broadcast>(input_param, target_shape);
+        broadcast->set_friendly_name(config.output_name);
+        result = std::make_shared<ngraph::opset9::Result>(broadcast);
+
+        auto length = std::accumulate(input_shape.begin(), input_shape.end(), (size_t)1, std::multiplies<size_t>());
+        std::vector<float> vector_data(length, 1.0);
+        auto constant = std::make_shared<ngraph::opset9::Constant>(config.ngraph_precision,
+                                                                   ngraph::Shape{input_shape},
+                                                                   vector_data);
+        auto add = std::make_shared<ngraph::opset9::Add>(input_param, constant);
+        auto activation = std::make_shared<ngraph::opset9::Sigmoid>(add);
+        auto result2 = std::make_shared<ngraph::opset9::Result>(activation);
+
+        results = {result, result2};
     }
 
-    return std::make_shared<ngraph::Function>(ngraph::ResultVector{result},
+    return std::make_shared<ngraph::Function>(results,
                                               ngraph::ParameterVector{input_param},
                                               config.function_name);
 }
@@ -129,7 +148,7 @@ void BroadcastToTileIssue::Validate() {
     ASSERT_EQ(1, inputs.size());
     ASSERT_TRUE(inputs.end() != inputs.find(s_input_friendly_name));
     auto outputs = executableNetwork.GetOutputsInfo();
-    ASSERT_EQ(1, outputs.size());
+    // ASSERT_EQ(1, outputs.size());
     ASSERT_TRUE(outputs.end() != outputs.find(s_output_friendly_name));
 }
 
@@ -138,7 +157,8 @@ TEST_P(BroadcastToTileIssue, CompareWithRefs) {
 }
 
 const std::vector<FunctionVariant> gc_function_variants = {FunctionVariant::BroadcastAfterActivation,
-                                                           FunctionVariant::BroadcastBeforeActivation};
+                                                           FunctionVariant::BroadcastBeforeActivation,
+                                                           FunctionVariant::BroadcastNearActivation};
 
 INSTANTIATE_TEST_SUITE_P(smoke_broadcast_tile_issue,
                          BroadcastToTileIssue,
