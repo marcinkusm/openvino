@@ -34,6 +34,7 @@ void ArkFile::get_file_info(const char* fileName,
         }
         in_file.close();
     } else {
+        std::cerr << "Error: " << strerror(errno);
         throw std::runtime_error(std::string("Failed to open %s for reading in get_file_info()!\n") + fileName);
     }
 

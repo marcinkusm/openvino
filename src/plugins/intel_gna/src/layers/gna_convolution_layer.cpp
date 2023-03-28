@@ -96,6 +96,7 @@ uint32_t outputFromPooling(const uint32_t in, const uint32_t window, const uint3
         return outputFromPoolingLegacy(in, stride);
     }
     // ceil[(in - window)/stride] + 1, GNA Spec 1.24
+    std::cout << "in: " << in << ", window: " << window << ", stride: " << stride << ", legacy: " << legacy << std::endl;
     if (window > in || window == 0 || stride == 0) {
         THROW_GNA_EXCEPTION << "Invalid (input, window, stride) = (" << in << "," << window << "," << stride << ")";
     }

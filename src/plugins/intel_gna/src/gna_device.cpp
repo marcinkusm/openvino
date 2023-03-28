@@ -204,7 +204,7 @@ uint32_t GNADeviceHelper::createModel(Gna2Model& gnaModel) const {
 
     backend::AMIntelDNN::updateNumberOfOutputsIfPoolingEnabled(gnaModel, legacyExecTarget);
 
-    if (per_model_diagnostics) {
+    if (1) {
         std::string path =
 #ifdef _WIN32
             ".\\";

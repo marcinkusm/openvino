@@ -310,7 +310,8 @@ protected:
         size_t in_total_dims_size =
             std::accumulate(std::begin(inputShape), std::end(inputShape), 1, std::multiplies<double>());
         auto params = ngraph::builder::makeParams(ngPrc, {{1, in_total_dims_size}});
-
+        params[0]->set_friendly_name("input");
+        params.front()->output(0).get_tensor().set_names({ "data" });
         auto pattern1 = std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64,
                                                                    ngraph::Shape{shape_size},
                                                                    inputShape);
@@ -330,6 +331,7 @@ protected:
         auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(permute2, pattern2, false);
 
         ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(reshape2)};
+        results[0]->set_friendly_name("output");
         function = std::make_shared<ngraph::Function>(results, params, "RemovePermutationsWithPoolAndActTest");
 
         if (transpose_to_reshape) {
@@ -337,6 +339,10 @@ protected:
             manager.register_pass<ov::pass::TransposeToReshape>();
             manager.run_passes(function);
         }
+
+        ngraph::pass::Manager manager;
+        manager.register_pass<ov::pass::Serialize>("out_1.xml","out_1.bin");
+        manager.run_passes(function);
     }
 };
 
@@ -397,7 +403,7 @@ protected:
         size_t in_total_dims_size =
             std::accumulate(std::begin(inputShape), std::end(inputShape), 1, std::multiplies<double>());
         auto params = ngraph::builder::makeParams(ngPrc, {{1, in_total_dims_size}});
-
+        params[0]->set_friendly_name("input");
         auto pattern1 = std::make_shared<ngraph::opset1::Constant>(ngraph::element::Type_t::i64,
                                                                    ngraph::Shape{shape_size},
                                                                    inputShape);
@@ -418,6 +424,7 @@ protected:
         auto reshape2 = std::make_shared<ngraph::opset1::Reshape>(permute2, pattern2, false);
 
         ngraph::ResultVector results{std::make_shared<ngraph::opset1::Result>(reshape2)};
+        results[0]->set_friendly_name("output");
         function = std::make_shared<ngraph::Function>(results, params, "RemovePermutationPass");
     }
 };
@@ -649,7 +656,8 @@ const std::vector<InferenceEngine::Precision> netPrecisions = {InferenceEngine::
                                                                InferenceEngine::Precision::FP16};
 
 const std::vector<std::map<std::string, std::string>> configs = {
-    {{"GNA_DEVICE_MODE", "GNA_SW_EXACT"}, {"GNA_SCALE_FACTOR_0", "327.67"}},
+    {{"GNA_DEVICE_MODE", "GNA_SW_EXACT"}, {"GNA_SCALE_FACTOR_0", "327.67"}, {"GNA_EXEC_TARGET", "GNA_TARGET_3_0"}},
+    {{"GNA_DEVICE_MODE", "GNA_SW_EXACT"}, {"GNA_SCALE_FACTOR_0", "327.67"}, {"GNA_EXEC_TARGET", "GNA_TARGET_3_5"}},
     {{"GNA_DEVICE_MODE", "GNA_SW_FP32"}}};
 
 const std::vector<std::vector<size_t>> inputShapes{
